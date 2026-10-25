@@ -1,46 +1,21 @@
 """
-  </section>
-  {% endif %}
+Stage 15 - Flask UI (redesigned) - NO pyarrow, NO streamlit, NO torch in UI process.
+The UI process never imports torch or pyarrow; the child process (src.cli_answer) does.
 
-  <footer>
-    Every answer shows its confidence, grounded flag and the exact passages it was generated from &mdash; nothing is hidden.<br>
-    Confidence gate: retrieval score &ge; 0.35 &rarr; answer&nbsp;&middot;&nbsp;below &rarr; refusal. Runs fully offline on CPU.
-  </footer>
-</div>
+2026-10 redesign: the page now lives in templates/index.html (card layout,
+suggestion chips, loading state, confidence badges, source score bars).
 
-<script>
-(function(){
-  var form = document.getElementById('ask-form');
-  var btn = document.getElementById('ask-btn');
-  var input = document.querySelector('input[name=question]');
-  var loading = document.getElementById('loading');
-  var elapsed = document.getElementById('elapsed');
-  var timerId = null;
-
-  form.addEventListener('submit', function(){
-    if(!input.value.trim()){ return; }
-    btn.disabled = true;
-    btn.innerHTML = 'Thinking&hellip;';
-    loading.style.display = 'block';
-    var t0 = Date.now();
-    timerId = setInterval(function(){
-      elapsed.textContent = Math.floor((Date.now() - t0) / 1000);
-    }, 250);
-    loading.scrollIntoView({behavior:'smooth', block:'center'});
-  });
-
-  var chips = document.querySelectorAll('.chip');
-  for(var i = 0; i < chips.length; i++){
-    chips[i].addEventListener('click', function(){
-      input.value = this.getAttribute('data-q');
-      form.requestSubmit();
-    });
-  }
-})();
-</script>
-</body>
-</html>
+Run: python app_flask.py
+Then open http://localhost:5000
 """
+from flask import Flask, request, render_template
+import subprocess
+import sys
+import json
+from pathlib import Path
+
+app = Flask(__name__)
+
 
 def get_answer_via_subprocess(question: str) -> dict:
     """UI process stays clean (no torch/pyarrow); the child process does the ML.
@@ -54,18 +29,21 @@ def get_answer_via_subprocess(question: str) -> dict:
     line = result.stdout.strip().splitlines()[-1]
     return json.loads(line)
 
+
 @app.route("/", methods=["GET"])
 def index():
-    return render_template_string(HTML, result=None, q="", error=None)
+    return render_template("index.html", result=None, q="", error=None)
+
 
 @app.route("/ask", methods=["POST"])
 def ask():
     q = request.form.get("question", "")
     try:
         res = get_answer_via_subprocess(q)
-        return render_template_string(HTML, result=res, q=q, error=None)
+        return render_template("index.html", result=res, q=q, error=None)
     except Exception as e:
-        return render_template_string(HTML, result=None, q=q, error=str(e))
+        return render_template("index.html", result=None, q=q, error=str(e))
+
 
 if __name__ == "__main__":
     print("Starting Flask UI on http://localhost:5000 - no pyarrow, no torch in main process")
