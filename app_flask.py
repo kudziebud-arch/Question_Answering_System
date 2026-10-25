@@ -1,86 +1,53 @@
 """
-Stage 15 - Flask UI - NO pyarrow, NO streamlit, bypasses WDAC for UI process
-UI process never imports torch or pyarrow. Child process does via cli_answer.
+  </section>
+  {% endif %}
 
-Run: python app_flask.py
-Then open http://localhost:5000
-"""
-from flask import Flask, request, jsonify, render_template_string
-import subprocess
-import sys
-import json
-from pathlib import Path
-import os
-
-app = Flask(__name__)
-
-HTML = """
-<!doctype html>
-<html>
-<head>
-<title>Generative QA - RAG</title>
-<style>
-body{font-family:Arial; max-width:900px; margin:20px auto; background:#f5f5f5; color:#222}
-.card{background:white; padding:20px; border-radius:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1); margin-bottom:15px}
-.badge{display:inline-block; padding:4px 8px; border-radius:5px; font-size:12px; margin-right:5px}
-.high{background:#d4edda} .medium{background:#fff3cd} .low{background:#f8d7da}
-.true{background:#d4edda} .false{background:#f8d7da}
-input,button{padding:10px; font-size:16px}
-input{width:70%} button{width:20%; cursor:pointer}
-pre{white-space:pre-wrap; background:#eee; padding:10px; border-radius:5px}
-</style>
-</head>
-<body>
-<h1>Question Answering System using NLP and Generative QA</h1>
-<p>RAG + FLAN-T5-base | threshold 0.35 | CPU-only | Flask bypass (no pyarrow)</p>
-
-<div class="card">
-<form method="POST" action="/ask">
-<input name="question" placeholder="Explain tokenization in simple words." value="{{q}}" required>
-<button type="submit">Get Answer</button>
-</form>
-<p>Try: Explain tokenization | What is RAG? | What is hallucination? | What is best recipe for chocolate cake? (OOD test)</p>
+  <footer>
+    Every answer shows its confidence, grounded flag and the exact passages it was generated from &mdash; nothing is hidden.<br>
+    Confidence gate: retrieval score &ge; 0.35 &rarr; answer&nbsp;&middot;&nbsp;below &rarr; refusal. Runs fully offline on CPU.
+  </footer>
 </div>
 
-{% if result %}
-<div class="card">
-<h3>Answer</h3>
-<p><b>{{result.answer}}</b></p>
-<p>
-<span class="badge {{result.confidence}}">confidence: {{result.confidence}}</span>
-<span class="badge {{result.grounded}}">grounded: {{result.grounded}}</span>
-<span class="badge">top_score: {{result.top_score}}</span>
-<span class="badge">latency: {{result.latency_sec}}s</span>
-</p>
-</div>
+<script>
+(function(){
+  var form = document.getElementById('ask-form');
+  var btn = document.getElementById('ask-btn');
+  var input = document.querySelector('input[name=question]');
+  var loading = document.getElementById('loading');
+  var elapsed = document.getElementById('elapsed');
+  var timerId = null;
 
-<div class="card">
-<h3>Sources (auditable)</h3>
-{% for s in result.sources %}
-<details>
-<summary>[{{"%.3f"|format(s.score)}}] {{s.source_file}} #{{s.chunk_index}}</summary>
-<pre>{{s.text}}</pre>
-<small>{{s.chunk_id}} | {{s.char_count}} chars</small>
-</details>
-{% endfor %}
-</div>
-{% endif %}
+  form.addEventListener('submit', function(){
+    if(!input.value.trim()){ return; }
+    btn.disabled = true;
+    btn.innerHTML = 'Thinking&hellip;';
+    loading.style.display = 'block';
+    var t0 = Date.now();
+    timerId = setInterval(function(){
+      elapsed.textContent = Math.floor((Date.now() - t0) / 1000);
+    }, 250);
+    loading.scrollIntoView({behavior:'smooth', block:'center'});
+  });
 
-{% if error %}
-<div class="card" style="background:#f8d7da">
-<h3>Error</h3>
-<pre>{{error}}</pre>
-</div>
-{% endif %}
-
+  var chips = document.querySelectorAll('.chip');
+  for(var i = 0; i < chips.length; i++){
+    chips[i].addEventListener('click', function(){
+      input.value = this.getAttribute('data-q');
+      form.requestSubmit();
+    });
+  }
+})();
+</script>
 </body>
 </html>
 """
 
 def get_answer_via_subprocess(question: str) -> dict:
+    """UI process stays clean (no torch/pyarrow); the child process does the ML.
+    Timeout 180 s: first question loads the model, generation is CPU-only."""
     cmd = [sys.executable, "-m", "src.cli_answer", question]
     project_root = Path(__file__).parent
-    result = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True, timeout=180)
     if result.returncode != 0:
         raise RuntimeError(f"Subprocess failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}")
     # last line is JSON
